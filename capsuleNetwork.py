@@ -60,18 +60,15 @@ def build_capsules(routing, input_data, num_units, num_capsules, kernel_size=Non
 	            curr, b_ij = capsule(input_data, b_ij, j)
 	            capsules.append(curr)
 
-	    # form tensor of shape [batch_size, 10, 16, 1]
-	    all_capsules = tf.concat(capsules, axis = 1)
+	    all_capsules = tf.concat(capsules, axis = 1) # [batch_size, 10, 16, 1]
 
 	else: # primary layer
-	    # [batch_size, 20, 20, 256]
 	    capsules = []
 	    for i in range(0, output_vec_len):
-	        # each capsule i: [batch_size, 6, 6, 32]
 	        with tf.variable_scope('unit_' + str(i)):
 	            curr_capsule = tf.contrib.layers.conv2d(input_data, num_capsules, kernel_size, stride, padding="VALID")
 	            curr_capsule = tf.reshape(curr_capsule, shape = (batch_size, -1, 1, 1))
-	            capsules.append(curr_capsule)
+	            capsules.append(curr_capsule) # each capsule is [batch_size, 6, 6, 32]
 
 	    # [batch_size, 1152, 8, 1]
 	    all_capsules = tf.concat(capsules, axis = 2)
