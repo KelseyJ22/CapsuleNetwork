@@ -1,7 +1,9 @@
 import numpy as np
 import tensorflow as tf
 import tempfile
+from tensorflow.examples.tutorials.mnist import input_data
 
+data_dir = '/tmp/tensorflow/mnist/input_data'
 num_iterations = 3
 batch_size = 128 
 lambda_val = 0.5
@@ -10,7 +12,7 @@ m_minus = 0.1
 lr = 1e-4
 
 def capsule(input_data, b_ij, ind_j):
-	with tf.variable_scope('routing'): # TODO: example code has this variable_scope -- do I actually need it?
+	with tf.variable_scope('routing'):
 	    w_ij = tf.Variable(np.random.normal(size = [1, 1152, 8, 16], scale = 0.01), dtype = tf.float32)
 	    w_ij = tf.tile(w_ij, [batch_size, 1, 1, 1]) # w_ij batch_size times: [batch_size, 1152, 8, 16]
 
@@ -149,6 +151,8 @@ def capsule_network(X, Y):
 
 
 def run_model():
+  mnist = input_data.read_data_sets(data_dir, one_hot=True)
+
   x = tf.placeholder(tf.float32, shape = (batch_size, 28, 28, 1))
   y_ = tf.placeholder(tf.float32, shape = (batch_size, 10))
   pred, loss = capsule_network(x, y_)
@@ -169,13 +173,13 @@ def run_model():
   with tf.Session() as sess:
 	sess.run(tf.global_variables_initializer())
 	for i in range(20000):
-		batch = mnist.train.next_batch(50)
+		batch = mnist.train.next_batch(batch_size)
 		if i % 100 == 0:
-			train_accuracy = accuracy.eval(feed_dict = {x: batch[0], y_: batch[1]})
+			train_accuracy = accuracy.eval(feed_dict = {x: np.reshape(batch[0], [-1, 28, 28, 1]), y_: batch[1]})
 			print('step %d, training accuracy %g' % (i, train_accuracy))
-		train_step.run(feed_dict = {x: batch[0], y_: batch[1]})
+		train_step.run(feed_dict = {x: np.reshape(batch[0], [-1, 28, 28, 1]), y_: batch[1]})
 
-	print('test accuracy %g' % accuracy.eval(feed_dict = {x: mnist.test.images, y_: mnist.test.labels}))
+	print('test accuracy %g' % accuracy.eval(feed_dict = {x: np.reshape(mnist.test.images, [-1, 28, 28, 1]), y_: mnist.test.labels}))
 
 
 run_model()
