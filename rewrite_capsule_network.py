@@ -17,33 +17,28 @@ def capsule(input_data, b_ij, ind_j):
 	    w_ij = tf.Variable(np.random.normal(size = [1, 1152, 8, 16], scale = 0.01), dtype = tf.float32)
 	    w_ij = tf.tile(w_ij, [batch_size, 1, 1, 1]) # w_ij batch_size times: [batch_size, 1152, 8, 16]
 
-	    u_hat = tf.matmul(w_ij, input_data, transpose_a = True) # [8, 16].T x [8, 1]: [16, 1]
-	    assert u_hat.get_shape() == [batch_size, 1152, 16, 1]
+	    u_hat = tf.matmul(w_ij, input_data, transpose_a = True) # [batch_size, 1152, 16, 1]
 
 	    shape = b_ij.get_shape().as_list()
 
-	    split = [ind_j, 1, shape[2] - ind_j - 1] # TODO: what is this used for?
+	    split = [ind_j, 1, shape[2] - ind_j - 1]
 
 	    for r in range(0, num_iterations):
 	        # line 4:
 	        c_ij = tf.nn.softmax(b_ij, dim = 2) # probability distribution of shape [1, 1152, 10, 1]
-	        assert c_ij.get_shape() == [1, 1152, 10, 1]
 
 	        # line 5:
 	        b_il, b_ij, b_ir = tf.split(b_ij, split, axis = 2)
-	        c_il, c_ij, b_or = tf.split(c_ij, split, axis = 2)
-	        assert c_ij.get_shape() == [1, 1152, 1, 1]
+	        c_il, c_ij, b_or = tf.split(c_ij, split, axis = 2) # [1, 1152, 1, 1]
 
 	        # line 6
-	        v_j = squash(tf.reduce_sum(tf.multiply(c_ij, u_hat), axis = 1, keep_dims = True)) # squash using Eq.1, resulting in [batch_size, 1, 16, 1]
-	        assert v_j.get_shape() == [batch_size, 1, 16, 1]
+	        v_j = squash(tf.reduce_sum(tf.multiply(c_ij, u_hat), axis = 1, keep_dims = True)) # squash with Eq.1: [batch_size, 1, 16, 1]
 
 	        # line 7
 	        v_j_tiled = tf.tile(v_j, [1, 1152, 1, 1]) # now [batch_size, 1152, 16, 1]
-	        u_v = tf.matmul(u_hat, v_j_tiled, transpose_a = True)
-	        assert u_v.get_shape() == [batch_size, 1152, 1, 1]
+	        u_v = tf.matmul(u_hat, v_j_tiled, transpose_a = True) # [batch_size, 1152, 1, 1]
 
-	        b_ij += tf.reduce_sum(u_v, axis = 0, keep_dims = True) # reduce in the batch_size dim: [1, 1152, 1, 1]
+	        b_ij += tf.reduce_sum(u_v, axis = 0, keep_dims = True)
 	        b_ij = tf.concat([b_il, b_ij, b_ir], axis = 2)
 
 	    return(v_j, b_ij)
@@ -67,7 +62,6 @@ def build_capsules(routing, input_data, output_vec_len, num_capsules, kernel_siz
 		        all_capsules.append(caps_j)
 
 		all_capsules = tf.concat(all_capsules, axis = 1) # [batch_size, 10, 16, 1]
-		assert all_capsules.get_shape() == [batch_size, 10, 16, 1]
 
 	else: # primary layer
 	    capsules = []
@@ -80,7 +74,6 @@ def build_capsules(routing, input_data, output_vec_len, num_capsules, kernel_siz
 	    # [batch_size, 1152, 8, 1]
 	    all_capsules = tf.concat(capsules, axis = 2)
 	    all_capsules = squash(all_capsules)
-	    assert all_capsules.get_shape() == [batch_size, 1152, 8, 1]	    
 
 	return all_capsules
 
@@ -88,8 +81,7 @@ def build_capsules(routing, input_data, output_vec_len, num_capsules, kernel_siz
 def loss(v_k, batch_size, X, Y, pred):
 	# margin loss
     max1 = tf.square(tf.maximum(0., m_plus - v_k)) # max(0, m_plus - ||v_k||)^2
-    max2 = tf.square(tf.maximum(0., v_k - m_minus)) # max(0, ||v_k|| - m_minus)^2
-    assert max1.get_shape() == [batch_size, 10, 1, 1]
+    max2 = tf.square(tf.maximum(0., v_k - m_minus)) # max(0, ||v_k|| - m_minus)^2 # [batch_size, 10, 1, 1]
 
     max1 = tf.reshape(max1, shape = (batch_size, -1))
     max2 = tf.reshape(max2, shape = (batch_size, -1))
