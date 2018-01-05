@@ -21,41 +21,39 @@ def capsule(input_data, b_ij, ind_j):
 	Returns:
 		Capsules for routing v_j and original index b_ij
 	"""
-    w_ij = tf.Variable(np.random.normal(size = [1, 1152, 8, 16], scale = 0.01), dtype = tf.float32)
-    w_ij = tf.tile(w_ij, [batch_size, 1, 1, 1]) # w_ij batch_size times: [batch_size, 1152, 8, 16]
+	w = tf.Variable(np.random.normal(size = [1, 1152, 8, 16], scale = 0.01), dtype = tf.float32)
+	w_ij = tf.tile(w, [batch_size, 1, 1, 1]) # w batch_size times: [batch_size, 1152, 8, 16]
 
-    u_hat = tf.matmul(w_ij, input_data, transpose_a = True) # [batch_size, 1152, 16, 1]
+	u_hat = tf.matmul(w_ij, input_data, transpose_a = True) # [batch_size, 1152, 16, 1]
+	shape = [ind_j, 1, b_ij.get_shape().as_list()[2] - ind_j - 1]
 
-    shape = b_ij.get_shape().as_list()
+	for r in range(0, num_iterations):
+	    # line 4:
+	    c_ij = tf.nn.softmax(b_ij, dim = 2) # probability distribution of shape [1, 1152, 10, 1]
 
-    split = [ind_j, 1, shape[2] - ind_j - 1]
+	    # line 5:
+	    b_il, b_ij, b_ir = tf.split(b_ij, shape, axis = 2)
+	    c_il, c_ij, b_ir = tf.split(c_ij, shape, axis = 2) # [1, 1152, 1, 1]
+	    # TODO: should this second line be b_ir or c_ir?
 
-    for r in range(0, num_iterations):
-        # line 4:
-        c_ij = tf.nn.softmax(b_ij, dim = 2) # probability distribution of shape [1, 1152, 10, 1]
+	    # line 6
+	    v = squash(tf.reduce_sum(tf.multiply(c_ij, u_hat), axis = 1, keep_dims = True)) # squash with Eq.1: [batch_size, 1, 16, 1]
 
-        # line 5:
-        b_il, b_ij, b_ir = tf.split(b_ij, split, axis = 2)
-        c_il, c_ij, b_or = tf.split(c_ij, split, axis = 2) # [1, 1152, 1, 1]
+	    # line 7
+	    v_j = tf.tile(v, [1, 1152, 1, 1]) # now [batch_size, 1152, 16, 1]
+	    u_v = tf.matmul(u_hat, v_j, transpose_a = True) # [batch_size, 1152, 1, 1]
 
-        # line 6
-        v_j = squash(tf.reduce_sum(tf.multiply(c_ij, u_hat), axis = 1, keep_dims = True)) # squash with Eq.1: [batch_size, 1, 16, 1]
+	    b_ij += tf.reduce_sum(u_v, axis = 0, keep_dims = True)
+	    b_ij = tf.concat([b_il, b_ij, b_ir], axis = 2)
 
-        # line 7
-        v_j_tiled = tf.tile(v_j, [1, 1152, 1, 1]) # now [batch_size, 1152, 16, 1]
-        u_v = tf.matmul(u_hat, v_j_tiled, transpose_a = True) # [batch_size, 1152, 1, 1]
-
-        b_ij += tf.reduce_sum(u_v, axis = 0, keep_dims = True)
-        b_ij = tf.concat([b_il, b_ij, b_ir], axis = 2)
-
-	return(v_j, b_ij)
+	return v, b_ij
 
 
 def squash(input_vec):
     vec = tf.sqrt(tf.reduce_sum(tf.square(input_vec)))  # scalar
-    vec_updated = tf.square(vec) / (1 + tf.square(vec))
-    squashed = vec_updated * tf.divide(input_vec, vec)  # elementwise
-    return(squashed)
+    temp = tf.square(vec) / (1 + tf.square(vec))
+    squashed = temp * tf.divide(input_vec, vec)  # elementwise
+    return squashed
 
 
 def build_capsules(routing, input_data, output_vec_len, num_capsules, kernel_size = None, stride = None):
@@ -71,8 +69,8 @@ def build_capsules(routing, input_data, output_vec_len, num_capsules, kernel_siz
 		The list of assembled capsules
 	"""
 	if routing: # digit layer
-		input_data = tf.reshape(input_data, shape=(batch_size, 1152, 8, 1))
-		b_ij = tf.zeros(shape=[1, 1152, 10, 1], dtype=np.float32)
+		input_data = tf.reshape(input_data, shape = (batch_size, 1152, 8, 1))
+		b_ij = tf.zeros(shape = [1, 1152, 10, 1], dtype = np.float32)
 		all_capsules = []
 		for j in range(num_capsules):
 		    with tf.variable_scope('caps_' + str(j)):
@@ -85,7 +83,7 @@ def build_capsules(routing, input_data, output_vec_len, num_capsules, kernel_siz
 	    capsules = []
 	    for i in range(0, output_vec_len):
 	        with tf.variable_scope('unit_' + str(i)):
-	            curr_capsule = tf.contrib.layers.conv2d(input_data, num_capsules, kernel_size, stride, padding="VALID")
+	            curr_capsule = tf.contrib.layers.conv2d(input_data, num_capsules, kernel_size, stride, padding = "VALID")
 	            curr_capsule = tf.reshape(curr_capsule, shape = (batch_size, -1, 1, 1))
 	            capsules.append(curr_capsule) # each capsule is [batch_size, 6, 6, 32]
 
