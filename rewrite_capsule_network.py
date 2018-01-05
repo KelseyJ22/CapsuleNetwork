@@ -98,14 +98,10 @@ def build_capsules(routing, input_data, output_vec_len, num_capsules, kernel_siz
 
 def loss(v_k, batch_size, X, Y, pred):
 	# margin loss
-    max1 = tf.square(tf.maximum(0., m_plus - v_k)) # max(0, m_plus - ||v_k||)^2
-    max2 = tf.square(tf.maximum(0., v_k - m_minus)) # max(0, ||v_k|| - m_minus)^2 # [batch_size, 10, 1, 1]
+    max1 = tf.reshape(tf.square(tf.maximum(0., m_plus - v_k)), shape = (batch_size, -1))
+    max2 = tf.reshape(tf.square(tf.maximum(0., v_k - m_minus)), shape = (batch_size, -1))
 
-    max1 = tf.reshape(max1, shape = (batch_size, -1))
-    max2 = tf.reshape(max2, shape = (batch_size, -1))
-
-    T_k = Y # T_k = 1 iff digit is present (works because Y is one hot)
-    L_k = T_k * max1 + lambda_val * (1 - T_k) * max2 # TODO: make this elementwise
+    L_k = Y * max1 + lambda_val * (1 - Y) * max2
     margin_loss = tf.reduce_mean(tf.reduce_sum(L_k, axis = 1))
 
     # reconstruction loss
@@ -115,13 +111,6 @@ def loss(v_k, batch_size, X, Y, pred):
 
     # total loss
     total_loss = margin_loss + 0.0005 * reconstruction_loss
-
-    # summarize
-    tf.summary.scalar('margin_loss', margin_loss)
-    tf.summary.scalar('reconstruction_loss', reconstruction_loss)
-    tf.summary.scalar('total_loss', total_loss)
-    tf.summary.image('reconstruction_img', tf.reshape(pred, shape = (batch_size, 28, 28, 1)))
-    merged_sum = tf.summary.merge_all()
 
     return total_loss
 
@@ -134,7 +123,7 @@ def capsule_network(X, Y):
 	Returns:
 		Predicted label and loss from this iteration
 	"""
-	convolution = tf.contrib.layers.conv2d(X, num_outputs = 256, kernel_size = 9, stride = 1, padding='VALID')
+	convolution = tf.contrib.layers.conv2d(X, num_outputs = 256, kernel_size = 9, stride = 1, padding = 'VALID')
 	capsule_one = build_capsules(False, convolution, 8, 32, kernel_size = 9, stride = 2)
 	capsule_two = build_capsules(True, capsule_one, 16, 10)
 
@@ -143,18 +132,18 @@ def capsule_network(X, Y):
 
 	largest_ind = tf.argmax(softmax_v, axis = 1, output_type = tf.int32)
 
-	masked_v = []
+	masked = []
 	largest_ind = tf.reshape(largest_ind, shape = (batch_size, ))
 	for batch in range(0, batch_size): # TODO: example code looks buggy here with "for batchsize in range(batchsize)"...
 	    v = capsule_two[batch][largest_ind[batch], :]
-	    masked_v.append(tf.reshape(v, shape = (1, 1, 16, 1)))
+	    masked.append(tf.reshape(v, shape = (1, 1, 16, 1)))
 
-	masked_v = tf.concat(masked_v, axis = 0)
+	masked = tf.concat(masked, axis = 0)
 
-	j_vec = tf.reshape(masked_v, shape = (batch_size, -1))
-	fc1 = tf.contrib.layers.fully_connected(j_vec, num_outputs = 512)
-	fc2 = tf.contrib.layers.fully_connected(fc1, num_outputs = 1024)
-	pred = tf.contrib.layers.fully_connected(fc2, num_outputs = 784, activation_fn = tf.sigmoid)
+	j_vec = tf.reshape(masked, shape = (batch_size, -1))
+	output_1 = tf.contrib.layers.fully_connected(j_vec, num_outputs = 512)
+	output_2 = tf.contrib.layers.fully_connected(output_1, num_outputs = 1024)
+	pred = tf.contrib.layers.fully_connected(output_2, num_outputs = 784, activation_fn = tf.sigmoid)
 
 	total_loss = loss(v_k, batch_size, X, Y, pred)
 
@@ -169,10 +158,12 @@ def run_model():
 
   pred, loss = capsule_network(x, y_)
 
-  train_step = tf.train.AdamOptimizer(lr).minimize(loss)
+  # TODO: try with this change
+  global_step = tf.Variable(0, name = 'global_step', trainable = False)
+
+  train_step = tf.train.AdamOptimizer(lr).minimize(loss, global_step = global_step)
 
   correct_prediction = tf.cast(tf.equal(tf.argmax(pred, 1), tf.argmax(y_, 1)), tf.float32)
-
   accuracy = tf.reduce_mean(correct_prediction)
 
   graph_location = tempfile.mkdtemp()
