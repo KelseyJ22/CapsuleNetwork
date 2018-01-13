@@ -21,39 +21,66 @@ def capsule(input_data, b_ij, ind_j):
 	Returns:
 		Capsules for routing v_j and original index b_ij
 	"""
-	w = tf.Variable(np.random.normal(size = [1, 1152, 8, 16], scale = 0.01), dtype = tf.float32)
-	w_ij = tf.tile(w, [batch_size, 1, 1, 1]) # w batch_size times: [batch_size, 1152, 8, 16]
+	"""w = tf.Variable(np.random.normal(size = [1, 1152, 10, 8, 16], scale = 0.01), dtype = tf.float32)
+	w_ij = tf.tile(w, [batch_size, 1, 1, 1, 1]) # w batch_size times: [batch_size, 1152, 8, 16]
+	tiled_data = tf.tile(input_data, [1, 1, 10, 1, 1])
 
 	u_hat = tf.matmul(w_ij, input_data, transpose_a = True) # [batch_size, 1152, 16, 1]
-	shape = [ind_j, 1, b_ij.get_shape().as_list()[2] - ind_j - 1]
+	#shape = [ind_j, 1, b_ij.get_shape().as_list()[2] - ind_j - 1]
+	u_hat_stopped = tf.stop_gradient(u_hat, name='stop_gradient')"""
 
+	print('input shape', input_data.get_shape())
+	W = tf.get_variable('Weight', shape=(1, 1152, 10, 8, 16), dtype=tf.float32,
+	                    initializer=tf.random_normal_initializer(stddev=0.01))
+
+	# input => [batch_size, 1152, 10, 8, 1]
+	# W => [batch_size, 1152, 10, 8, 16]
+	input_data = tf.tile(input_data, [1, 1, 10, 1, 1])
+	W = tf.tile(W, [batch_size, 1, 1, 1, 1])
+	assert input.get_shape() == [batch_size, 1152, 10, 8, 1]
+
+	u_hat = tf.matmul(W, input, transpose_a=True)
+	assert u_hat.get_shape() == [batch_size, 1152, 10, 16, 1]
+
+	u_hat_stopped = tf.stop_gradient(u_hat, name='stop_gradient')
 	for r in range(0, num_iterations):
 	    # line 4:
 	    c_ij = tf.nn.softmax(b_ij, dim = 2) # probability distribution of shape [1, 1152, 10, 1]
+	    
+	    if r == num_iterations - 1:
+	    	# line 5 and 6
+	    	v_j = squash(tf.reduce_sum(tf.multiply(c_ij, u_hat), axis=1, keep_dims=True))
+	    
+	    elif r < num_iterations - 1:
+		    # line 5:
+		    #b_il, b_ij, b_ir = tf.split(b_ij, shape, axis = 2)
+		    #c_il, c_ij, c_ir = tf.split(c_ij, shape, axis = 2) # [1, 1152, 1, 1]
 
-	    # line 5:
-	    b_il, b_ij, b_ir = tf.split(b_ij, shape, axis = 2)
-	    c_il, c_ij, b_ir = tf.split(c_ij, shape, axis = 2) # [1, 1152, 1, 1]
-	    # TODO: should this second line be b_ir or c_ir?
+		    # line 6
+		    v = squash(tf.reduce_sum(tf.multiply(c_ij, u_hat_stopped), axis = 1, keep_dims = True)) # squash with Eq.1: [batch_size, 1, 16, 1]
 
-	    # line 6
-	    v = squash(tf.reduce_sum(tf.multiply(c_ij, u_hat), axis = 1, keep_dims = True)) # squash with Eq.1: [batch_size, 1, 16, 1]
+		    # line 7
+		    v_j = tf.tile(v, [1, 1152, 1, 1]) # now [batch_size, 1152, 16, 1]
+		    u_v = tf.matmul(u_hat_stopped, v_j, transpose_a = True) # [batch_size, 1152, 1, 1]
 
-	    # line 7
-	    v_j = tf.tile(v, [1, 1152, 1, 1]) # now [batch_size, 1152, 16, 1]
-	    u_v = tf.matmul(u_hat, v_j, transpose_a = True) # [batch_size, 1152, 1, 1]
-
-	    b_ij += tf.reduce_sum(u_v, axis = 0, keep_dims = True)
-	    b_ij = tf.concat([b_il, b_ij, b_ir], axis = 2)
+		    #b_ij += tf.reduce_sum(u_v, axis = 0, keep_dims = True)
+		    #b_ij = tf.concat([b_il, b_ij, b_ir], axis = 2)
+		    b_ij += u_v
 
 	return v, b_ij
 
 
 def squash(input_vec):
-    vec = tf.sqrt(tf.reduce_sum(tf.square(input_vec)))  # scalar
+    """vec = tf.sqrt(tf.reduce_sum(tf.square(input_vec)))  # scalar
     temp = tf.square(vec) / (1 + tf.square(vec))
     squashed = temp * tf.divide(input_vec, vec)  # elementwise
-    return squashed
+    return squashed"""
+    epsilon = 1e-9
+    vec_squared_norm = tf.reduce_sum(tf.square(input_vec), -2, keep_dims=True)
+    scalar_factor = vec_squared_norm / (1 + vec_squared_norm) / tf.sqrt(vec_squared_norm + epsilon)
+    vec_squashed = scalar_factor * input_vec  # element-wise
+    return(vec_squashed)
+   
 
 
 def build_capsules(routing, input_data, output_vec_len, num_capsules, kernel_size = None, stride = None):
@@ -69,7 +96,7 @@ def build_capsules(routing, input_data, output_vec_len, num_capsules, kernel_siz
 		The list of assembled capsules
 	"""
 	if routing: # digit layer
-		input_data = tf.reshape(input_data, shape = (batch_size, 1152, 8, 1))
+		"""input_data = tf.reshape(input_data, shape = (batch_size, 1152, 8, 1))
 		b_ij = tf.zeros(shape = [1, 1152, 10, 1], dtype = np.float32)
 		all_capsules = []
 		for j in range(num_capsules):
@@ -77,21 +104,34 @@ def build_capsules(routing, input_data, output_vec_len, num_capsules, kernel_siz
 		        caps_j, b_ij = capsule(input_data, b_ij, j)
 		        all_capsules.append(caps_j)
 
-		all_capsules = tf.concat(all_capsules, axis = 1) # [batch_size, 10, 16, 1]
+		all_capsules = tf.concat(all_capsules, axis = 1) # [batch_size, 10, 16, 1]"""
+		input_data = tf.reshape(input, shape=(batch_size, -1, 1, input_data.shape[-2].value, 1))
+
+		b_IJ = tf.constant(np.zeros([batch_size, input_data.shape[1].value, num_capsules, 1, 1], dtype=np.float32))
+		capsules = routing(input_data, b_IJ)
+		capsules = tf.squeeze(capsules, axis=1)
 
 	else: # primary layer
-	    capsules = []
-	    for i in range(0, output_vec_len):
-	        with tf.variable_scope('unit_' + str(i)):
-	            curr_capsule = tf.contrib.layers.conv2d(input_data, num_capsules, kernel_size, stride, padding = "VALID")
-	            curr_capsule = tf.reshape(curr_capsule, shape = (batch_size, -1, 1, 1))
-	            capsules.append(curr_capsule) # each capsule is [batch_size, 6, 6, 32]
+		"""capsules = []
+		for i in range(0, output_vec_len):
+		    with tf.variable_scope('unit_' + str(i)):
+		        curr_capsule = tf.contrib.layers.conv2d(input_data, num_capsules, kernel_size, stride, padding = "VALID")
+		        curr_capsule = tf.reshape(curr_capsule, shape = (batch_size, -1, 1, 1))
+		        capsules.append(curr_capsule) # each capsule is [batch_size, 6, 6, 32]
 
-	    # [batch_size, 1152, 8, 1]
-	    all_capsules = tf.concat(capsules, axis = 2)
-	    all_capsules = squash(all_capsules)
+		# [batch_size, 1152, 8, 1]
+		all_capsules = tf.concat(capsules, axis = 2)
+		all_capsules = squash(all_capsules)"""
+		capsules = tf.contrib.layers.conv2d(input_data, num_capsules * output_vec_len,
+		                                    kernel_size, stride, padding="VALID",
+		                                    activation_fn=tf.nn.relu)
+		capsules = tf.reshape(capsules, (batch_size, -1, output_vec_len, 1))
 
-	return all_capsules
+		# [batch_size, 1152, 8, 1]
+		capsules = squash(capsules)
+		assert capsules.get_shape() == [batch_size, 1152, 8, 1]
+
+	return capsules
 
 
 def loss(v_k, batch_size, X, Y, pred):
@@ -121,17 +161,17 @@ def capsule_network(X, Y):
 	Returns:
 		Predicted label and loss from this iteration
 	"""
+	epsilon = 1e-9
 	convolution = tf.contrib.layers.conv2d(X, num_outputs = 256, kernel_size = 9, stride = 1, padding = 'VALID')
 	capsule_one = build_capsules(False, convolution, 8, 32, kernel_size = 9, stride = 2)
 	capsule_two = build_capsules(True, capsule_one, 16, 10)
 
-	v_k = tf.sqrt(tf.reduce_sum(tf.square(capsule_two), axis = 2, keep_dims = True)) # calculate ||v_k||
+	v_k = tf.sqrt(tf.reduce_sum(tf.square(capsule_two), axis = 2, keep_dims = True) + epsilon) # calculate ||v_k||
 	softmax_v = tf.nn.softmax(v_k, dim = 1)
 
-	largest_ind = tf.argmax(softmax_v, axis = 1, output_type = tf.int32)
+	largest_ind = tf.reshape(tf.argmax(softmax_v, axis = 1, output_type = tf.int32), shape = (batch_size, ))
 
 	masked = []
-	largest_ind = tf.reshape(largest_ind, shape = (batch_size, ))
 	for batch in range(0, batch_size): # TODO: example code looks buggy here with "for batchsize in range(batchsize)"...
 	    v = capsule_two[batch][largest_ind[batch], :]
 	    masked.append(tf.reshape(v, shape = (1, 1, 16, 1)))
@@ -151,8 +191,8 @@ def capsule_network(X, Y):
 def run_model():
   mnist = input_data.read_data_sets(data_dir, one_hot=True)
 
-  x = tf.placeholder(tf.float32, shape = (batch_size, 28, 28, 1))
-  y_ = tf.placeholder(tf.float32, shape = (batch_size, 10))
+  x = tf.placeholder(tf.float32, shape = (None, 28, 28, 1))
+  y_ = tf.placeholder(tf.float32, shape = (None, 10))
 
   pred, loss = capsule_network(x, y_)
 
