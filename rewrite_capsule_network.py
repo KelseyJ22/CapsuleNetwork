@@ -12,7 +12,8 @@ m_minus = 0.1
 lr = 1e-4
 
 
-def capsule(input_data, b_ij, ind_j):
+#def capsule(input_data, b_ij, ind_j):
+def capsule(input_data, b_ij):
 	"""builds the capsules for use in the capsule network as described by Hinton et all
 	Args:
 		input_data: input tensor of image data
@@ -37,9 +38,9 @@ def capsule(input_data, b_ij, ind_j):
 	# W => [batch_size, 1152, 10, 8, 16]
 	input_data = tf.tile(input_data, [1, 1, 10, 1, 1])
 	W = tf.tile(W, [batch_size, 1, 1, 1, 1])
-	assert input.get_shape() == [batch_size, 1152, 10, 8, 1]
+	assert input_data.get_shape() == [batch_size, 1152, 10, 8, 1]
 
-	u_hat = tf.matmul(W, input, transpose_a=True)
+	u_hat = tf.matmul(W, input_data, transpose_a=True)
 	assert u_hat.get_shape() == [batch_size, 1152, 10, 16, 1]
 
 	u_hat_stopped = tf.stop_gradient(u_hat, name='stop_gradient')
@@ -60,14 +61,14 @@ def capsule(input_data, b_ij, ind_j):
 		    v = squash(tf.reduce_sum(tf.multiply(c_ij, u_hat_stopped), axis = 1, keep_dims = True)) # squash with Eq.1: [batch_size, 1, 16, 1]
 
 		    # line 7
-		    v_j = tf.tile(v, [1, 1152, 1, 1]) # now [batch_size, 1152, 16, 1]
+		    v_j = tf.tile(v, [1, 1152, 1, 1, 1]) # now [batch_size, 1152, 16, 1]
 		    u_v = tf.matmul(u_hat_stopped, v_j, transpose_a = True) # [batch_size, 1152, 1, 1]
 
 		    #b_ij += tf.reduce_sum(u_v, axis = 0, keep_dims = True)
 		    #b_ij = tf.concat([b_il, b_ij, b_ir], axis = 2)
 		    b_ij += u_v
 
-	return v, b_ij
+	return v
 
 
 def squash(input_vec):
@@ -105,10 +106,10 @@ def build_capsules(routing, input_data, output_vec_len, num_capsules, kernel_siz
 		        all_capsules.append(caps_j)
 
 		all_capsules = tf.concat(all_capsules, axis = 1) # [batch_size, 10, 16, 1]"""
-		input_data = tf.reshape(input, shape=(batch_size, -1, 1, input_data.shape[-2].value, 1))
+		input_data = tf.reshape(input_data, shape=(batch_size, -1, 1, input_data.shape[-2].value, 1))
 
 		b_IJ = tf.constant(np.zeros([batch_size, input_data.shape[1].value, num_capsules, 1, 1], dtype=np.float32))
-		capsules = routing(input_data, b_IJ)
+		capsules = capsule(input_data, b_IJ)
 		capsules = tf.squeeze(capsules, axis=1)
 
 	else: # primary layer
@@ -163,6 +164,7 @@ def capsule_network(X, Y):
 	"""
 	epsilon = 1e-9
 	convolution = tf.contrib.layers.conv2d(X, num_outputs = 256, kernel_size = 9, stride = 1, padding = 'VALID')
+	assert convolution.get_shape() == [batch_size, 20, 20, 256]
 	capsule_one = build_capsules(False, convolution, 8, 32, kernel_size = 9, stride = 2)
 	capsule_two = build_capsules(True, capsule_one, 16, 10)
 
@@ -191,17 +193,15 @@ def capsule_network(X, Y):
 def run_model():
   mnist = input_data.read_data_sets(data_dir, one_hot=True)
 
-  x = tf.placeholder(tf.float32, shape = (None, 28, 28, 1))
-  y_ = tf.placeholder(tf.float32, shape = (None, 10))
+  x = tf.placeholder(tf.float32, shape = (batch_size, 28, 28, 1))
+  y = tf.placeholder(tf.float32, shape = (batch_size, 10))
 
-  pred, loss = capsule_network(x, y_)
+  pred, loss = capsule_network(x, y)
 
-  # TODO: try with this change
   global_step = tf.Variable(0, name = 'global_step', trainable = False)
-
   train_step = tf.train.AdamOptimizer(lr).minimize(loss, global_step = global_step)
 
-  correct_prediction = tf.cast(tf.equal(tf.argmax(pred, 1), tf.argmax(y_, 1)), tf.float32)
+  correct_prediction = tf.cast(tf.equal(tf.argmax(pred, 1), tf.argmax(y, 1)), tf.float32)
   accuracy = tf.reduce_mean(correct_prediction)
 
   graph_location = tempfile.mkdtemp()
@@ -214,11 +214,11 @@ def run_model():
 	for i in range(20000):
 		batch = mnist.train.next_batch(batch_size)
 		if i % 100 == 0:
-			train_accuracy = accuracy.eval(feed_dict = {x: np.reshape(batch[0], [-1, 28, 28, 1]), y_: batch[1]})
+			train_accuracy = accuracy.eval(feed_dict = {x: np.reshape(batch[0], [-1, 28, 28, 1]), y: batch[1]})
 			print('step %d, training accuracy %g' % (i, train_accuracy))
-		train_step.run(feed_dict = {x: np.reshape(batch[0], [-1, 28, 28, 1]), y_: batch[1]})
+		train_step.run(feed_dict = {x: np.reshape(batch[0], [-1, 28, 28, 1]), y: batch[1]})
 
-	print('test accuracy %g' % accuracy.eval(feed_dict = {x: np.reshape(mnist.test.images, [-1, 28, 28, 1]), y_: mnist.test.labels}))
+	print('test accuracy %g' % accuracy.eval(feed_dict = {x: np.reshape(mnist.test.images, [-1, 28, 28, 1]), y: mnist.test.labels}))
 
 
 run_model()
